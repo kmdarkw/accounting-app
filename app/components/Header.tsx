@@ -10,6 +10,7 @@ const pageTitles: Record<string, string> = {
   "/receipts": "المقبوضات",
   "/invoices": "المقبوضات",
   "/expenses": "المصروفات",
+  "/obligations": "الالتزامات",
   "/customers": "العملاء",
   "/customers/new": "إضافة عميل جديد",
   "/categories": "التصنيفات",

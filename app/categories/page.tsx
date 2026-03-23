@@ -19,6 +19,7 @@ import {
   ACCOUNT_GROUP_ID,
   CLIENT_EXPENSE_GROUP_ID,
   CLIENT_RECEIPT_GROUP_ID,
+  COMPANY_EXPENSE_GROUP_ID,
   categoryGroups,
   CategoryGroupId,
   CUSTOMER_CLASSIFICATION_GROUP_ID,
@@ -35,6 +36,7 @@ type CategoryItem = {
 const initialInputs: Record<CategoryGroupId, string> = {
   customerClassification: "",
   customerStage: "",
+  companyExpense: "",
   clientExpense: "",
   clientReceipt: "",
   account: "",
@@ -212,6 +214,18 @@ export default function CategoriesPage() {
           setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في المقبوضات.");
           return;
         }
+
+        const obligationItemsRef = collection(db, "obligationItems");
+        const linkedObligationItemsQuery = query(
+          obligationItemsRef,
+          where("categoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedObligationItemsSnapshot = await getDocs(linkedObligationItemsQuery);
+        if (!linkedObligationItemsSnapshot.empty) {
+          setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في الالتزامات المستقبلية.");
+          return;
+        }
       }
 
       if (category.groupId === CLIENT_EXPENSE_GROUP_ID) {
@@ -224,6 +238,44 @@ export default function CategoriesPage() {
         const linkedExpensesSnapshot = await getDocs(linkedExpensesQuery);
         if (!linkedExpensesSnapshot.empty) {
           setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في المصروفات.");
+          return;
+        }
+
+        const obligationItemsRef = collection(db, "obligationItems");
+        const linkedObligationItemsQuery = query(
+          obligationItemsRef,
+          where("categoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedObligationItemsSnapshot = await getDocs(linkedObligationItemsQuery);
+        if (!linkedObligationItemsSnapshot.empty) {
+          setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في الالتزامات المستقبلية.");
+          return;
+        }
+      }
+
+      if (category.groupId === COMPANY_EXPENSE_GROUP_ID) {
+        const expensesRef = collection(db, "expenses");
+        const linkedExpensesQuery = query(
+          expensesRef,
+          where("expenseCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedExpensesSnapshot = await getDocs(linkedExpensesQuery);
+        if (!linkedExpensesSnapshot.empty) {
+          setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في مصروفات الشركة.");
+          return;
+        }
+
+        const obligationItemsRef = collection(db, "obligationItems");
+        const linkedObligationItemsQuery = query(
+          obligationItemsRef,
+          where("categoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedObligationItemsSnapshot = await getDocs(linkedObligationItemsQuery);
+        if (!linkedObligationItemsSnapshot.empty) {
+          setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في الالتزامات المستقبلية.");
           return;
         }
       }
@@ -250,6 +302,18 @@ export default function CategoriesPage() {
         const linkedExpensesSnapshot = await getDocs(linkedExpensesQuery);
         if (!linkedExpensesSnapshot.empty) {
           setError("لا يمكن حذف هذا الحساب لأنه مستخدم في المصروفات.");
+          return;
+        }
+
+        const obligationItemsRef = collection(db, "obligationItems");
+        const linkedObligationItemsQuery = query(
+          obligationItemsRef,
+          where("accountCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedObligationItemsSnapshot = await getDocs(linkedObligationItemsQuery);
+        if (!linkedObligationItemsSnapshot.empty) {
+          setError("لا يمكن حذف هذا الحساب لأنه مستخدم في الالتزامات المستقبلية.");
           return;
         }
       }

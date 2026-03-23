@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  CalendarClock,
   FileText,
   HandCoins,
   LayoutDashboard,
@@ -16,6 +17,7 @@ const navItems = [
   { label: "الرئيسية", href: "/", icon: LayoutDashboard },
   { label: "المقبوضات", href: "/receipts", icon: FileText },
   { label: "المصروفات", href: "/expenses", icon: HandCoins },
+  { label: "الالتزامات", href: "/obligations", icon: CalendarClock },
   { label: "العملاء", href: "/customers", icon: Users },
   { label: "التصنيفات", href: "/categories", icon: Tags },
   { label: "التقارير", href: "/reports", icon: BarChart3 },

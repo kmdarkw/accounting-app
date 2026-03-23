@@ -3,7 +3,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { addDoc, collection, onSnapshot, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "@/app/lib/firebase";
-import { ACCOUNT_GROUP_ID, CLIENT_EXPENSE_GROUP_ID } from "@/app/lib/category-groups";
+import {
+  ACCOUNT_GROUP_ID,
+  CLIENT_EXPENSE_GROUP_ID,
+  COMPANY_EXPENSE_GROUP_ID,
+} from "@/app/lib/category-groups";
 import { writeAuditLog } from "@/app/lib/audit";
 import { formatCurrencyKwd, formatGregorianDate } from "@/app/lib/formatters";
 
@@ -100,6 +104,11 @@ export default function ExpensesPage() {
     [categories],
   );
 
+  const companyExpenseCategories = useMemo(
+    () => categories.filter((category) => category.groupId === COMPANY_EXPENSE_GROUP_ID),
+    [categories],
+  );
+
   const accountCategories = useMemo(
     () => categories.filter((category) => category.groupId === ACCOUNT_GROUP_ID),
     [categories],
@@ -131,6 +140,7 @@ export default function ExpensesPage() {
 
     let selectedCustomer: CustomerOption | undefined;
     let selectedExpenseCategory: CategoryOption | undefined;
+    let selectedCompanyExpenseCategory: CategoryOption | undefined;
 
     if (form.scope === "customer") {
       if (!form.customerId.trim() || !form.expenseCategoryId.trim()) {
@@ -147,6 +157,19 @@ export default function ExpensesPage() {
         setError("اختيارات العميل أو تصنيف المصروف غير صالحة.");
         return;
       }
+    } else {
+      if (!form.expenseCategoryId.trim()) {
+        setError("عند الصرف العام يجب اختيار تصنيف مصروفات الشركة.");
+        return;
+      }
+
+      selectedCompanyExpenseCategory = companyExpenseCategories.find(
+        (item) => item.id === form.expenseCategoryId,
+      );
+      if (!selectedCompanyExpenseCategory) {
+        setError("تصنيف مصروفات الشركة غير صالح.");
+        return;
+      }
     }
 
     try {
@@ -161,8 +184,10 @@ export default function ExpensesPage() {
         customerId: selectedCustomer?.id ?? "",
         customerName: selectedCustomer?.name ?? "",
         customerContractNumber: selectedCustomer?.contractNumber ?? "",
-        expenseCategoryId: selectedExpenseCategory?.id ?? "",
-        expenseCategoryName: selectedExpenseCategory?.name ?? "",
+        expenseCategoryId:
+          selectedExpenseCategory?.id ?? selectedCompanyExpenseCategory?.id ?? "",
+        expenseCategoryName:
+          selectedExpenseCategory?.name ?? selectedCompanyExpenseCategory?.name ?? "",
         createdByUid: auth.currentUser?.uid ?? "",
         createdByEmail: auth.currentUser?.email ?? "",
         updatedByUid: auth.currentUser?.uid ?? "",
@@ -178,6 +203,8 @@ export default function ExpensesPage() {
           scope: form.scope,
           amount,
           customerId: selectedCustomer?.id ?? "",
+          expenseCategoryId:
+            selectedExpenseCategory?.id ?? selectedCompanyExpenseCategory?.id ?? "",
         },
       });
 
@@ -231,6 +258,7 @@ export default function ExpensesPage() {
                   setForm((prev) => ({
                     ...prev,
                     scope: "customer",
+                    expenseCategoryId: "",
                   }))
                 }
                 className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
@@ -296,6 +324,31 @@ export default function ExpensesPage() {
               >
                 <option value="">اختر تصنيف المصروف</option>
                 {expenseCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          {form.scope === "company" ? (
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">
+                سبب الصرف (تصنيف مصروفات الشركة)
+              </span>
+              <select
+                value={form.expenseCategoryId}
+                onChange={(event) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    expenseCategoryId: event.target.value,
+                  }))
+                }
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+              >
+                <option value="">اختر تصنيف مصروفات الشركة</option>
+                {companyExpenseCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
                   </option>

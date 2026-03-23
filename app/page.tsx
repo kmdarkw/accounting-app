@@ -22,11 +22,20 @@ type ExpenseItem = {
   expenseCategoryName: string;
 };
 
+type ObligationItem = {
+  id: string;
+  dueDate: string;
+  amount: number;
+  direction: "inflow" | "outflow";
+  status: "pending" | "settled";
+};
+
 const numberFormatter = new Intl.NumberFormat("ar-KW-u-nu-latn");
 
 export default function HomePage() {
   const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [obligationItems, setObligationItems] = useState<ObligationItem[]>([]);
   const [customersCount, setCustomersCount] = useState(0);
 
   useEffect(() => {
@@ -99,6 +108,41 @@ export default function HomePage() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "obligationItems"), (snapshot) => {
+      const nextItems = snapshot.docs
+        .map((docItem) => {
+          const data = docItem.data() as {
+            dueDate?: string;
+            amount?: number;
+            direction?: "inflow" | "outflow";
+            status?: "pending" | "settled";
+          };
+          if (
+            !data.dueDate ||
+            typeof data.amount !== "number" ||
+            !data.direction ||
+            !data.status
+          ) {
+            return null;
+          }
+
+          return {
+            id: docItem.id,
+            dueDate: data.dueDate,
+            amount: data.amount,
+            direction: data.direction,
+            status: data.status,
+          } satisfies ObligationItem;
+        })
+        .filter((item): item is ObligationItem => item !== null);
+
+      setObligationItems(nextItems);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const totalReceipts = useMemo(
     () => receipts.reduce((sum, item) => sum + item.amount, 0),
     [receipts],
@@ -108,6 +152,38 @@ export default function HomePage() {
     [expenses],
   );
   const netCashFlow = totalReceipts - totalExpenses;
+  const todayString = new Date().toISOString().slice(0, 10);
+  const nextMonthDate = new Date();
+  nextMonthDate.setMonth(nextMonthDate.getMonth() + 1);
+  const in30DaysString = nextMonthDate.toISOString().slice(0, 10);
+
+  const dueOutflow30 = useMemo(
+    () =>
+      obligationItems
+        .filter(
+          (item) =>
+            item.status === "pending" &&
+            item.direction === "outflow" &&
+            item.dueDate >= todayString &&
+            item.dueDate <= in30DaysString,
+        )
+        .reduce((sum, item) => sum + item.amount, 0),
+    [obligationItems, in30DaysString, todayString],
+  );
+
+  const dueInflow30 = useMemo(
+    () =>
+      obligationItems
+        .filter(
+          (item) =>
+            item.status === "pending" &&
+            item.direction === "inflow" &&
+            item.dueDate >= todayString &&
+            item.dueDate <= in30DaysString,
+        )
+        .reduce((sum, item) => sum + item.amount, 0),
+    [obligationItems, in30DaysString, todayString],
+  );
 
   const latestTransactions = useMemo(() => {
     const receiptRows = receipts.map((item) => ({
@@ -154,6 +230,16 @@ export default function HomePage() {
       title: "عدد العملاء",
       value: numberFormatter.format(customersCount),
       accent: "text-amber-600",
+    },
+    {
+      title: "التزامات علينا خلال 30 يوم",
+      value: formatCurrencyKwd(dueOutflow30),
+      accent: "text-rose-600",
+    },
+    {
+      title: "مستحقات لنا خلال 30 يوم",
+      value: formatCurrencyKwd(dueInflow30),
+      accent: "text-emerald-600",
     },
   ];
 
