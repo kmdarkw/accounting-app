@@ -1,65 +1,222 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useMemo, useState } from "react";
+import { collection, onSnapshot } from "firebase/firestore";
+import { db } from "@/app/lib/firebase";
+import { formatCurrencyKwd, formatGregorianDate } from "@/app/lib/formatters";
+
+type ReceiptItem = {
+  id: string;
+  date: string;
+  amount: number;
+  customerName: string;
+  receiptCategoryName: string;
+};
+
+type ExpenseItem = {
+  id: string;
+  date: string;
+  amount: number;
+  scope: "company" | "customer";
+  customerName: string;
+  expenseCategoryName: string;
+};
+
+const numberFormatter = new Intl.NumberFormat("ar-KW-u-nu-latn");
+
+export default function HomePage() {
+  const [receipts, setReceipts] = useState<ReceiptItem[]>([]);
+  const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
+  const [customersCount, setCustomersCount] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "receipts"), (snapshot) => {
+      const nextReceipts = snapshot.docs
+        .map((docItem) => {
+          const data = docItem.data() as {
+            date?: string;
+            amount?: number;
+            customerName?: string;
+            receiptCategoryName?: string;
+          };
+          if (!data.date || typeof data.amount !== "number") {
+            return null;
+          }
+
+          return {
+            id: docItem.id,
+            date: data.date,
+            amount: data.amount,
+            customerName: data.customerName ?? "",
+            receiptCategoryName: data.receiptCategoryName ?? "",
+          } satisfies ReceiptItem;
+        })
+        .filter((item): item is ReceiptItem => item !== null);
+
+      setReceipts(nextReceipts);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "expenses"), (snapshot) => {
+      const nextExpenses = snapshot.docs
+        .map((docItem) => {
+          const data = docItem.data() as {
+            date?: string;
+            amount?: number;
+            scope?: "company" | "customer";
+            customerName?: string;
+            expenseCategoryName?: string;
+          };
+          if (!data.date || typeof data.amount !== "number") {
+            return null;
+          }
+
+          return {
+            id: docItem.id,
+            date: data.date,
+            amount: data.amount,
+            scope: data.scope === "customer" ? "customer" : "company",
+            customerName: data.customerName ?? "",
+            expenseCategoryName: data.expenseCategoryName ?? "",
+          } satisfies ExpenseItem;
+        })
+        .filter((item): item is ExpenseItem => item !== null);
+
+      setExpenses(nextExpenses);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "customers"), (snapshot) => {
+      setCustomersCount(snapshot.size);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const totalReceipts = useMemo(
+    () => receipts.reduce((sum, item) => sum + item.amount, 0),
+    [receipts],
+  );
+  const totalExpenses = useMemo(
+    () => expenses.reduce((sum, item) => sum + item.amount, 0),
+    [expenses],
+  );
+  const netCashFlow = totalReceipts - totalExpenses;
+
+  const latestTransactions = useMemo(() => {
+    const receiptRows = receipts.map((item) => ({
+      id: `receipt-${item.id}`,
+      date: item.date,
+      description: `${item.customerName || "عميل"} - ${item.receiptCategoryName || "مقبوض"}`,
+      type: "إيراد" as const,
+      amount: item.amount,
+    }));
+
+    const expenseRows = expenses.map((item) => ({
+      id: `expense-${item.id}`,
+      date: item.date,
+      description:
+        item.scope === "customer"
+          ? `${item.customerName || "عميل"} - ${item.expenseCategoryName || "مصروف عميل"}`
+          : "مصروف عام للشركة",
+      type: "مصروف" as const,
+      amount: item.amount,
+    }));
+
+    return [...receiptRows, ...expenseRows]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 12);
+  }, [expenses, receipts]);
+
+  const stats = [
+    {
+      title: "إجمالي المقبوضات",
+      value: formatCurrencyKwd(totalReceipts),
+      accent: "text-emerald-600",
+    },
+    {
+      title: "إجمالي المصروفات",
+      value: formatCurrencyKwd(totalExpenses),
+      accent: "text-rose-600",
+    },
+    {
+      title: "صافي التدفق النقدي",
+      value: formatCurrencyKwd(netCashFlow),
+      accent: netCashFlow >= 0 ? "text-blue-600" : "text-rose-600",
+    },
+    {
+      title: "عدد العملاء",
+      value: numberFormatter.format(customersCount),
+      accent: "text-amber-600",
+    },
+  ];
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="space-y-6">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {stats.map((card) => (
+          <article
+            key={card.title}
+            className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            <p className="text-sm text-slate-500">{card.title}</p>
+            <p className={`mt-3 text-2xl font-bold ${card.accent}`}>{card.value}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 px-5 py-4">
+          <h3 className="text-base font-semibold text-slate-900">أحدث المعاملات</h3>
         </div>
-      </main>
+
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-right">
+            <thead className="bg-slate-50 text-sm text-slate-600">
+              <tr>
+                <th className="px-5 py-3 font-medium">التاريخ</th>
+                <th className="px-5 py-3 font-medium">البيان</th>
+                <th className="px-5 py-3 font-medium">النوع</th>
+                <th className="px-5 py-3 font-medium">المبلغ</th>
+              </tr>
+            </thead>
+            <tbody className="text-sm text-slate-700">
+              {latestTransactions.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-5 py-6 text-center text-slate-500">
+                    لا توجد معاملات مسجلة بعد.
+                  </td>
+                </tr>
+              ) : (
+                latestTransactions.map((tx) => (
+                  <tr key={tx.id} className="border-t border-slate-100">
+                    <td className="px-5 py-3">{formatGregorianDate(tx.date)}</td>
+                    <td className="px-5 py-3">{tx.description}</td>
+                    <td className="px-5 py-3">
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                          tx.type === "إيراد"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-rose-100 text-rose-700"
+                        }`}
+                      >
+                        {tx.type}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 font-semibold">{formatCurrencyKwd(tx.amount)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
