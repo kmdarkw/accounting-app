@@ -3,9 +3,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/app/lib/firebase";
-import { isLikelyPhone, phoneToManagerEmail } from "@/app/lib/auth-helpers";
+import { auth } from "@/app/lib/firebase";
+import { isLikelyPhone, phoneToAuthEmail } from "@/app/lib/auth-helpers";
+import { ensureUserProfile } from "@/app/lib/users";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,15 +23,14 @@ export default function LoginPage() {
       }
 
       try {
-        const adminRef = doc(db, "admins", user.uid);
-        const adminDoc = await getDoc(adminRef);
-        if (adminDoc.exists()) {
-          router.replace("/");
+        const profile = await ensureUserProfile(user);
+        if (profile && profile.isActive) {
+          router.replace(profile.mustChangePassword ? "/change-password" : "/");
           return;
         }
 
         await signOut(auth);
-        setError("هذا الحساب غير مصرح له كمدير نظام.");
+        setError("هذا الحساب غير مصرح له بالدخول.");
       } catch {
         setError("تعذر التحقق من صلاحية الحساب.");
       } finally {
@@ -58,20 +57,19 @@ export default function LoginPage() {
 
     try {
       setIsLoading(true);
-      const email = phoneToManagerEmail(phone);
+      const email = phoneToAuthEmail(phone);
       const credentials = await signInWithEmailAndPassword(auth, email, password);
-      const adminRef = doc(db, "admins", credentials.user.uid);
-      const adminDoc = await getDoc(adminRef);
+      const profile = await ensureUserProfile(credentials.user);
 
-      if (!adminDoc.exists()) {
+      if (!profile || !profile.isActive) {
         await signOut(auth);
-        setError("هذا الحساب غير مصرح له كمدير نظام.");
+        setError("هذا الحساب غير مصرح له بالدخول.");
         return;
       }
 
-      router.replace("/");
+      router.replace(profile.mustChangePassword ? "/change-password" : "/");
     } catch {
-      setError("بيانات الدخول غير صحيحة أو لا يوجد حساب مدير مطابق.");
+      setError("بيانات الدخول غير صحيحة أو لا يوجد حساب مطابق.");
     } finally {
       setIsLoading(false);
     }
@@ -90,9 +88,9 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-8">
       <section className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-bold text-slate-900">دخول مدير النظام</h1>
+        <h1 className="text-xl font-bold text-slate-900">دخول النظام</h1>
         <p className="mt-2 text-sm text-slate-500">
-          لا يمكن الدخول إلى النظام إلا بحساب مدير مسجل مسبقًا.
+          يتم الدخول برقم الهاتف وكلمة المرور المؤقتة أو الدائمة.
         </p>
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>

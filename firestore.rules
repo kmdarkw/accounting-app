@@ -5,9 +5,30 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    function isLegacyAdmin() {
       return isSignedIn() &&
         exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function hasUserProfile() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function currentUserProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveUser() {
+      return hasUserProfile() && currentUserProfile().isActive == true;
+    }
+
+    function canUseApp() {
+      return isLegacyAdmin() || isActiveUser();
+    }
+
+    function isSuperAdmin() {
+      return isActiveUser() && currentUserProfile().role == "super_admin";
     }
 
     match /admins/{uid} {
@@ -15,8 +36,27 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /users/{uid} {
+      allow read: if canUseApp();
+
+      allow create: if isSuperAdmin() ||
+        (isLegacyAdmin() && request.auth.uid == uid);
+
+      allow update: if isSuperAdmin() ||
+        (
+          isSignedIn() &&
+          request.auth.uid == uid &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.phone == resource.data.phone &&
+          request.resource.data.isActive == resource.data.isActive &&
+          request.resource.data.mustChangePassword == false
+        );
+
+      allow delete: if isSuperAdmin();
+    }
+
     match /{document=**} {
-      allow read, write: if isAdmin();
+      allow read, write: if canUseApp();
     }
   }
 }

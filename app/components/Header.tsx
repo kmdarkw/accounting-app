@@ -13,9 +13,11 @@ const pageTitles: Record<string, string> = {
   "/obligations": "الالتزامات",
   "/customers": "العملاء",
   "/customers/new": "إضافة عميل جديد",
+  "/users": "إدارة المستخدمين",
   "/categories": "التصنيفات",
   "/reports": "التقارير",
   "/settings": "الإعدادات",
+  "/change-password": "تغيير كلمة المرور",
 };
 
 export default function Header() {

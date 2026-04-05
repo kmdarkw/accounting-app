@@ -3,10 +3,10 @@
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
 import Header from "@/app/components/Header";
 import Sidebar from "@/app/components/Sidebar";
-import { auth, db } from "@/app/lib/firebase";
+import { auth } from "@/app/lib/firebase";
+import { ensureUserProfile } from "@/app/lib/users";
 
 type ProtectedLayoutProps = {
   children: ReactNode;
@@ -17,9 +17,11 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
   const router = useRouter();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isAllowed, setIsAllowed] = useState(false);
+  const isPublicRoute = pathname === "/login";
+  const isPasswordChangeRoute = pathname === "/change-password";
 
   useEffect(() => {
-    if (pathname === "/login") {
+    if (isPublicRoute) {
       setIsCheckingAuth(false);
       setIsAllowed(true);
       return;
@@ -37,13 +39,33 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
       }
 
       try {
-        const adminRef = doc(db, "admins", user.uid);
-        const adminDoc = await getDoc(adminRef);
-        if (!adminDoc.exists()) {
+        const profile = await ensureUserProfile(user);
+        if (!profile || !profile.isActive) {
           await signOut(auth);
           setIsCheckingAuth(false);
           setIsAllowed(false);
           router.replace("/login");
+          return;
+        }
+
+        if (profile.mustChangePassword && !isPasswordChangeRoute) {
+          setIsAllowed(false);
+          setIsCheckingAuth(false);
+          router.replace("/change-password");
+          return;
+        }
+
+        if (!profile.mustChangePassword && isPasswordChangeRoute) {
+          setIsAllowed(false);
+          setIsCheckingAuth(false);
+          router.replace("/");
+          return;
+        }
+
+        if (pathname === "/users" && profile.role !== "super_admin") {
+          setIsAllowed(false);
+          setIsCheckingAuth(false);
+          router.replace("/");
           return;
         }
 
@@ -56,9 +78,9 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
     });
 
     return () => unsubscribe();
-  }, [pathname, router]);
+  }, [isPasswordChangeRoute, isPublicRoute, pathname, router]);
 
-  if (pathname === "/login") {
+  if (isPublicRoute) {
     return <>{children}</>;
   }
 
@@ -74,6 +96,10 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
 
   if (!isAllowed) {
     return null;
+  }
+
+  if (isPasswordChangeRoute) {
+    return <>{children}</>;
   }
 
   return (

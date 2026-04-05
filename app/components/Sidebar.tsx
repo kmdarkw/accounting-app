@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Settings,
   Tags,
+  UserCog,
   Users,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ const navItems = [
   { label: "المصروفات", href: "/expenses", icon: HandCoins },
   { label: "الالتزامات", href: "/obligations", icon: CalendarClock },
   { label: "العملاء", href: "/customers", icon: Users },
+  { label: "المستخدمون", href: "/users", icon: UserCog },
   { label: "التصنيفات", href: "/categories", icon: Tags },
   { label: "التقارير", href: "/reports", icon: BarChart3 },
   { label: "الإعدادات", href: "/settings", icon: Settings },
