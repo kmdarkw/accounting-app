@@ -20,6 +20,7 @@ import {
   CLIENT_EXPENSE_GROUP_ID,
   CLIENT_RECEIPT_GROUP_ID,
   COMPANY_EXPENSE_GROUP_ID,
+  CONTRACT_TYPE_GROUP_ID,
   categoryGroups,
   CategoryGroupId,
   CUSTOMER_CLASSIFICATION_GROUP_ID,
@@ -35,6 +36,7 @@ type CategoryItem = {
 
 const initialInputs: Record<CategoryGroupId, string> = {
   customerClassification: "",
+  contractType: "",
   customerStage: "",
   companyExpense: "",
   clientExpense: "",
@@ -198,6 +200,20 @@ export default function CategoriesPage() {
         const linkedCustomersSnapshot = await getDocs(linkedCustomersQuery);
         if (!linkedCustomersSnapshot.empty) {
           setError("لا يمكن حذف هذا التصنيف لأنه مرتبط بعملاء مسجلين.");
+          return;
+        }
+      }
+
+      if (category.groupId === CONTRACT_TYPE_GROUP_ID) {
+        const customersRef = collection(db, "customers");
+        const linkedCustomersQuery = query(
+          customersRef,
+          where("contractTypeCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedCustomersSnapshot = await getDocs(linkedCustomersQuery);
+        if (!linkedCustomersSnapshot.empty) {
+          setError("لا يمكن حذف نوع العقد لأنه مرتبط بعملاء مسجلين.");
           return;
         }
       }

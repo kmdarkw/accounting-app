@@ -13,7 +13,10 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db } from "@/app/lib/firebase";
-import { CUSTOMER_CLASSIFICATION_GROUP_ID } from "@/app/lib/category-groups";
+import {
+  CONTRACT_TYPE_GROUP_ID,
+  CUSTOMER_CLASSIFICATION_GROUP_ID,
+} from "@/app/lib/category-groups";
 import { writeAuditLog } from "@/app/lib/audit";
 
 type CategoryOption = {
@@ -27,6 +30,7 @@ type CustomerFormState = {
   name: string;
   phone: string;
   customerCategoryId: string;
+  contractTypeCategoryId: string;
 };
 
 const initialFormState: CustomerFormState = {
@@ -34,6 +38,7 @@ const initialFormState: CustomerFormState = {
   name: "",
   phone: "",
   customerCategoryId: "",
+  contractTypeCategoryId: "",
 };
 
 export default function NewCustomerPage() {
@@ -74,6 +79,11 @@ export default function NewCustomerPage() {
     [categories],
   );
 
+  const contractTypeCategories = useMemo(
+    () => categories.filter((category) => category.groupId === CONTRACT_TYPE_GROUP_ID),
+    [categories],
+  );
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -83,8 +93,15 @@ export default function NewCustomerPage() {
     const customerName = form.name.trim();
     const phone = form.phone.trim();
     const categoryId = form.customerCategoryId.trim();
+    const contractTypeCategoryId = form.contractTypeCategoryId.trim();
 
-    if (!contractNumber || !customerName || !phone || !categoryId) {
+    if (
+      !contractNumber ||
+      !customerName ||
+      !phone ||
+      !categoryId ||
+      !contractTypeCategoryId
+    ) {
       setError("يرجى تعبئة جميع الحقول المطلوبة قبل الحفظ.");
       return;
     }
@@ -95,6 +112,15 @@ export default function NewCustomerPage() {
 
     if (!selectedCategory) {
       setError("تصنيف العميل غير صالح. يرجى إعادة الاختيار.");
+      return;
+    }
+
+    const selectedContractType = contractTypeCategories.find(
+      (category) => category.id === contractTypeCategoryId,
+    );
+
+    if (!selectedContractType) {
+      setError("نوع العقد غير صالح. يرجى إعادة الاختيار.");
       return;
     }
 
@@ -117,6 +143,8 @@ export default function NewCustomerPage() {
         phone,
         customerCategoryId: selectedCategory.id,
         customerCategoryName: selectedCategory.name,
+        contractTypeCategoryId: selectedContractType.id,
+        contractTypeCategoryName: selectedContractType.name,
         createdByUid: auth.currentUser?.uid ?? "",
         createdByEmail: auth.currentUser?.email ?? "",
         updatedByUid: auth.currentUser?.uid ?? "",
@@ -150,7 +178,7 @@ export default function NewCustomerPage() {
           <div>
             <h1 className="text-lg font-semibold text-slate-900">إضافة عميل جديد</h1>
             <p className="mt-1 text-sm text-slate-500">
-              أدخل رقم العقد وبيانات العميل ثم اختر تصنيفه.
+              أدخل رقم العقد وبيانات العميل ثم اختر تصنيف العميل ونوع العقد.
             </p>
           </div>
 
@@ -218,6 +246,27 @@ export default function NewCustomerPage() {
             >
               <option value="">اختر تصنيف العميل</option>
               {customerCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="space-y-1">
+            <span className="text-sm font-medium text-slate-700">نوع العقد</span>
+            <select
+              value={form.contractTypeCategoryId}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  contractTypeCategoryId: event.target.value,
+                }))
+              }
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+            >
+              <option value="">اختر نوع العقد</option>
+              {contractTypeCategories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}
                 </option>

@@ -1,5 +1,6 @@
 export const categoryGroups = [
   { id: "customerClassification", label: "تصنيف العميل" },
+  { id: "contractType", label: "نوع العقد" },
   { id: "customerStage", label: "مرحلة العميل" },
   { id: "companyExpense", label: "مصروفات الشركة" },
   { id: "clientExpense", label: "مصروفات للعميل" },
@@ -11,6 +12,7 @@ export type CategoryGroupId = (typeof categoryGroups)[number]["id"];
 
 export const CUSTOMER_CLASSIFICATION_GROUP_ID: CategoryGroupId =
   "customerClassification";
+export const CONTRACT_TYPE_GROUP_ID: CategoryGroupId = "contractType";
 export const CUSTOMER_STAGE_GROUP_ID: CategoryGroupId = "customerStage";
 export const COMPANY_EXPENSE_GROUP_ID: CategoryGroupId = "companyExpense";
 export const CLIENT_EXPENSE_GROUP_ID: CategoryGroupId = "clientExpense";
