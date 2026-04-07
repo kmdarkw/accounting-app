@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { Plus } from "lucide-react";
 import {
@@ -34,6 +35,13 @@ type CategoryItem = {
   groupId: CategoryGroupId;
 };
 
+type ContractTypeExpenseTemplate = {
+  id: string;
+  contractTypeCategoryId: string;
+  expenseCategoryId: string;
+  expenseCategoryName: string;
+};
+
 const initialInputs: Record<CategoryGroupId, string> = {
   customerClassification: "",
   contractType: "",
@@ -46,11 +54,16 @@ const initialInputs: Record<CategoryGroupId, string> = {
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [templates, setTemplates] = useState<ContractTypeExpenseTemplate[]>([]);
+  const [templateSelections, setTemplateSelections] = useState<Record<string, string[]>>({});
   const [inputs, setInputs] = useState(initialInputs);
   const [savingGroup, setSavingGroup] = useState<CategoryGroupId | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [actionCategoryId, setActionCategoryId] = useState<string | null>(null);
+  const [savingTemplateContractTypeId, setSavingTemplateContractTypeId] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -74,6 +87,59 @@ export default function CategoriesPage() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "contractTypeExpenseTemplates"), (snapshot) => {
+      const items = snapshot.docs
+        .map((docItem) => {
+          const data = docItem.data() as {
+            contractTypeCategoryId?: string;
+            expenseCategoryId?: string;
+            expenseCategoryName?: string;
+          };
+
+          if (!data.contractTypeCategoryId || !data.expenseCategoryId) {
+            return null;
+          }
+
+          return {
+            id: docItem.id,
+            contractTypeCategoryId: data.contractTypeCategoryId,
+            expenseCategoryId: data.expenseCategoryId,
+            expenseCategoryName: data.expenseCategoryName ?? "",
+          } satisfies ContractTypeExpenseTemplate;
+        })
+        .filter((item): item is ContractTypeExpenseTemplate => item !== null);
+
+      setTemplates(items);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const groupedSelections: Record<string, string[]> = {};
+
+    templates.forEach((template) => {
+      if (!groupedSelections[template.contractTypeCategoryId]) {
+        groupedSelections[template.contractTypeCategoryId] = [];
+      }
+
+      groupedSelections[template.contractTypeCategoryId].push(template.expenseCategoryId);
+    });
+
+    setTemplateSelections(groupedSelections);
+  }, [templates]);
+
+  const contractTypeCategories = useMemo(
+    () => categories.filter((category) => category.groupId === CONTRACT_TYPE_GROUP_ID),
+    [categories],
+  );
+
+  const clientExpenseCategories = useMemo(
+    () => categories.filter((category) => category.groupId === CLIENT_EXPENSE_GROUP_ID),
+    [categories],
+  );
 
   function handleAddCategory(event: FormEvent<HTMLFormElement>, groupId: CategoryGroupId) {
     event.preventDefault();
@@ -134,6 +200,93 @@ export default function CategoriesPage() {
   function cancelEdit() {
     setEditingCategoryId(null);
     setEditingName("");
+  }
+
+  function toggleTemplateExpense(contractTypeCategoryId: string, expenseCategoryId: string) {
+    setTemplateSelections((prev) => {
+      const current = new Set(prev[contractTypeCategoryId] ?? []);
+
+      if (current.has(expenseCategoryId)) {
+        current.delete(expenseCategoryId);
+      } else {
+        current.add(expenseCategoryId);
+      }
+
+      return {
+        ...prev,
+        [contractTypeCategoryId]: Array.from(current),
+      };
+    });
+  }
+
+  async function saveContractTypeTemplate(contractTypeCategory: CategoryItem) {
+    try {
+      setError("");
+      setSavingTemplateContractTypeId(contractTypeCategory.id);
+
+      const selectedExpenseIds = templateSelections[contractTypeCategory.id] ?? [];
+      const selectedExpenseSet = new Set(selectedExpenseIds);
+      const existingTemplates = templates.filter(
+        (template) => template.contractTypeCategoryId === contractTypeCategory.id,
+      );
+
+      const batch = writeBatch(db);
+
+      selectedExpenseIds.forEach((expenseCategoryId) => {
+        const expenseCategory = clientExpenseCategories.find(
+          (category) => category.id === expenseCategoryId,
+        );
+        if (!expenseCategory) {
+          return;
+        }
+
+        const templateRef = doc(
+          db,
+          "contractTypeExpenseTemplates",
+          `${contractTypeCategory.id}_${expenseCategory.id}`,
+        );
+        batch.set(
+          templateRef,
+          {
+            contractTypeCategoryId: contractTypeCategory.id,
+            contractTypeCategoryName: contractTypeCategory.name,
+            expenseCategoryId: expenseCategory.id,
+            expenseCategoryName: expenseCategory.name,
+            updatedByUid: auth.currentUser?.uid ?? "",
+            updatedByEmail: auth.currentUser?.email ?? "",
+            updatedAt: serverTimestamp(),
+            createdByUid: auth.currentUser?.uid ?? "",
+            createdByEmail: auth.currentUser?.email ?? "",
+            createdAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+      });
+
+      existingTemplates.forEach((template) => {
+        if (selectedExpenseSet.has(template.expenseCategoryId)) {
+          return;
+        }
+
+        const templateRef = doc(db, "contractTypeExpenseTemplates", template.id);
+        batch.delete(templateRef);
+      });
+
+      await batch.commit();
+      void writeAuditLog({
+        action: "update",
+        entity: "contractTypeExpenseTemplate",
+        entityId: contractTypeCategory.id,
+        details: {
+          contractTypeCategoryId: contractTypeCategory.id,
+          expenseCategoryIds: selectedExpenseIds,
+        },
+      });
+    } catch {
+      setError("تعذر حفظ قالب المصروفات لهذا النوع من العقود.");
+    } finally {
+      setSavingTemplateContractTypeId(null);
+    }
   }
 
   async function handleUpdateCategory(category: CategoryItem) {
@@ -216,6 +369,30 @@ export default function CategoriesPage() {
           setError("لا يمكن حذف نوع العقد لأنه مرتبط بعملاء مسجلين.");
           return;
         }
+
+        const templatesRef = collection(db, "contractTypeExpenseTemplates");
+        const linkedTemplatesQuery = query(
+          templatesRef,
+          where("contractTypeCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedTemplatesSnapshot = await getDocs(linkedTemplatesQuery);
+        if (!linkedTemplatesSnapshot.empty) {
+          setError("لا يمكن حذف نوع العقد لأنه مرتبط بقالب مصروفات.");
+          return;
+        }
+
+        const expectedExpensesRef = collection(db, "customerExpectedExpenses");
+        const linkedExpectedExpensesQuery = query(
+          expectedExpensesRef,
+          where("contractTypeCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedExpectedExpensesSnapshot = await getDocs(linkedExpectedExpensesQuery);
+        if (!linkedExpectedExpensesSnapshot.empty) {
+          setError("لا يمكن حذف نوع العقد لأنه مستخدم في مصروفات متوقعة لعملاء.");
+          return;
+        }
       }
 
       if (category.groupId === CLIENT_RECEIPT_GROUP_ID) {
@@ -266,6 +443,30 @@ export default function CategoriesPage() {
         const linkedObligationItemsSnapshot = await getDocs(linkedObligationItemsQuery);
         if (!linkedObligationItemsSnapshot.empty) {
           setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في الالتزامات المستقبلية.");
+          return;
+        }
+
+        const templatesRef = collection(db, "contractTypeExpenseTemplates");
+        const linkedTemplatesQuery = query(
+          templatesRef,
+          where("expenseCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedTemplatesSnapshot = await getDocs(linkedTemplatesQuery);
+        if (!linkedTemplatesSnapshot.empty) {
+          setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في قوالب أنواع العقود.");
+          return;
+        }
+
+        const expectedExpensesRef = collection(db, "customerExpectedExpenses");
+        const linkedExpectedExpensesQuery = query(
+          expectedExpensesRef,
+          where("expenseCategoryId", "==", category.id),
+          limit(1),
+        );
+        const linkedExpectedExpensesSnapshot = await getDocs(linkedExpectedExpensesQuery);
+        if (!linkedExpectedExpensesSnapshot.empty) {
+          setError("لا يمكن حذف هذا التصنيف لأنه مستخدم في مصروفات متوقعة لعملاء.");
           return;
         }
       }
@@ -468,6 +669,72 @@ export default function CategoriesPage() {
             </article>
           );
         })}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-base font-semibold text-slate-900">قوالب مصروفات نوع العقد</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          حدد بنود مصروفات العميل المتوقعة لكل نوع عقد.
+        </p>
+
+        {!contractTypeCategories.length ? (
+          <p className="mt-4 text-sm text-slate-500">
+            أضف نوع عقد واحد على الأقل من قسم "نوع العقد" أولاً.
+          </p>
+        ) : !clientExpenseCategories.length ? (
+          <p className="mt-4 text-sm text-slate-500">
+            أضف تصنيفًا واحدًا على الأقل في قسم "مصروفات للعميل" أولاً.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-4">
+            {contractTypeCategories.map((contractTypeCategory) => {
+              const selectedIds = templateSelections[contractTypeCategory.id] ?? [];
+              const selectedSet = new Set(selectedIds);
+
+              return (
+                <article
+                  key={contractTypeCategory.id}
+                  className="rounded-xl border border-slate-200 p-4"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-800">
+                      {contractTypeCategory.name}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => saveContractTypeTemplate(contractTypeCategory)}
+                      disabled={savingTemplateContractTypeId === contractTypeCategory.id}
+                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 disabled:opacity-70"
+                    >
+                      {savingTemplateContractTypeId === contractTypeCategory.id
+                        ? "جاري الحفظ..."
+                        : "حفظ القالب"}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {clientExpenseCategories.map((expenseCategory) => (
+                      <label
+                        key={`${contractTypeCategory.id}_${expenseCategory.id}`}
+                        className="flex items-center gap-2 rounded-lg border border-slate-100 px-2 py-1.5 text-sm text-slate-700"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSet.has(expenseCategory.id)}
+                          onChange={() =>
+                            toggleTemplateExpense(contractTypeCategory.id, expenseCategory.id)
+                          }
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                        <span>{expenseCategory.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

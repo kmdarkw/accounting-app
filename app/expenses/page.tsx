@@ -1,7 +1,19 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { addDoc, collection, onSnapshot, serverTimestamp } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  increment,
+  limit,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 import { auth, db } from "@/app/lib/firebase";
 import {
   ACCOUNT_GROUP_ID,
@@ -17,12 +29,19 @@ type CustomerOption = {
   id: string;
   name: string;
   contractNumber: string;
+  contractTypeCategoryId: string;
+  contractTypeCategoryName: string;
 };
 
 type CategoryOption = {
   id: string;
   name: string;
   groupId: string;
+};
+
+type ContractTypeExpenseTemplate = {
+  contractTypeCategoryId: string;
+  expenseCategoryId: string;
 };
 
 type ExpenseFormState = {
@@ -49,6 +68,7 @@ export default function ExpensesPage() {
   const [form, setForm] = useState(initialExpenseForm);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [templates, setTemplates] = useState<ContractTypeExpenseTemplate[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -57,7 +77,12 @@ export default function ExpensesPage() {
     const unsubscribe = onSnapshot(collection(db, "customers"), (snapshot) => {
       const nextCustomers = snapshot.docs
         .map((docItem) => {
-          const data = docItem.data() as { name?: string; contractNumber?: string };
+          const data = docItem.data() as {
+            name?: string;
+            contractNumber?: string;
+            contractTypeCategoryId?: string;
+            contractTypeCategoryName?: string;
+          };
           if (!data.name) {
             return null;
           }
@@ -66,6 +91,8 @@ export default function ExpensesPage() {
             id: docItem.id,
             name: data.name,
             contractNumber: data.contractNumber ?? "",
+            contractTypeCategoryId: data.contractTypeCategoryId ?? "",
+            contractTypeCategoryName: data.contractTypeCategoryName ?? "",
           } satisfies CustomerOption;
         })
         .filter((item): item is CustomerOption => item !== null);
@@ -99,6 +126,31 @@ export default function ExpensesPage() {
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "contractTypeExpenseTemplates"), (snapshot) => {
+      const nextTemplates = snapshot.docs
+        .map((docItem) => {
+          const data = docItem.data() as {
+            contractTypeCategoryId?: string;
+            expenseCategoryId?: string;
+          };
+          if (!data.contractTypeCategoryId || !data.expenseCategoryId) {
+            return null;
+          }
+
+          return {
+            contractTypeCategoryId: data.contractTypeCategoryId,
+            expenseCategoryId: data.expenseCategoryId,
+          } satisfies ContractTypeExpenseTemplate;
+        })
+        .filter((item): item is ContractTypeExpenseTemplate => item !== null);
+
+      setTemplates(nextTemplates);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const expenseCategories = useMemo(
     () => categories.filter((category) => category.groupId === CLIENT_EXPENSE_GROUP_ID),
     [categories],
@@ -113,6 +165,48 @@ export default function ExpensesPage() {
     () => categories.filter((category) => category.groupId === ACCOUNT_GROUP_ID),
     [categories],
   );
+
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === form.customerId),
+    [customers, form.customerId],
+  );
+
+  const hasTemplateForSelectedCustomerContractType = useMemo(() => {
+    if (!selectedCustomer?.contractTypeCategoryId) {
+      return false;
+    }
+
+    return templates.some(
+      (template) =>
+        template.contractTypeCategoryId === selectedCustomer.contractTypeCategoryId,
+    );
+  }, [selectedCustomer, templates]);
+
+  const allowedExpenseCategoryIdsForSelectedCustomer = useMemo(() => {
+    if (!selectedCustomer?.contractTypeCategoryId) {
+      return [];
+    }
+
+    return templates
+      .filter(
+        (template) =>
+          template.contractTypeCategoryId === selectedCustomer.contractTypeCategoryId,
+      )
+      .map((template) => template.expenseCategoryId);
+  }, [selectedCustomer, templates]);
+
+  const customerScopeExpenseCategories = useMemo(() => {
+    if (!hasTemplateForSelectedCustomerContractType) {
+      return expenseCategories;
+    }
+
+    const allowedIds = new Set(allowedExpenseCategoryIdsForSelectedCustomer);
+    return expenseCategories.filter((category) => allowedIds.has(category.id));
+  }, [
+    allowedExpenseCategoryIdsForSelectedCustomer,
+    expenseCategories,
+    hasTemplateForSelectedCustomerContractType,
+  ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -149,12 +243,20 @@ export default function ExpensesPage() {
       }
 
       selectedCustomer = customers.find((item) => item.id === form.customerId);
-      selectedExpenseCategory = expenseCategories.find(
+      selectedExpenseCategory = customerScopeExpenseCategories.find(
         (item) => item.id === form.expenseCategoryId,
       );
 
       if (!selectedCustomer || !selectedExpenseCategory) {
         setError("اختيارات العميل أو تصنيف المصروف غير صالحة.");
+        return;
+      }
+
+      if (
+        hasTemplateForSelectedCustomerContractType &&
+        !allowedExpenseCategoryIdsForSelectedCustomer.includes(selectedExpenseCategory.id)
+      ) {
+        setError("هذا البند غير متوقع لنوع عقد العميل المحدد.");
         return;
       }
     } else {
@@ -207,6 +309,48 @@ export default function ExpensesPage() {
             selectedExpenseCategory?.id ?? selectedCompanyExpenseCategory?.id ?? "",
         },
       });
+
+      if (form.scope === "customer" && selectedCustomer && selectedExpenseCategory) {
+        const expectedExpenseQuery = query(
+          collection(db, "customerExpectedExpenses"),
+          where("customerId", "==", selectedCustomer.id),
+          where("expenseCategoryId", "==", selectedExpenseCategory.id),
+          limit(1),
+        );
+        const expectedExpenseSnapshot = await getDocs(expectedExpenseQuery);
+
+        if (!expectedExpenseSnapshot.empty) {
+          const expectedExpenseDoc = expectedExpenseSnapshot.docs[0];
+          await updateDoc(doc(db, "customerExpectedExpenses", expectedExpenseDoc.id), {
+            status: "recorded",
+            totalSpentAmount: increment(amount),
+            lastExpenseDate: form.date,
+            updatedByUid: auth.currentUser?.uid ?? "",
+            updatedByEmail: auth.currentUser?.email ?? "",
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await addDoc(collection(db, "customerExpectedExpenses"), {
+            customerId: selectedCustomer.id,
+            customerName: selectedCustomer.name,
+            customerContractNumber: selectedCustomer.contractNumber,
+            contractTypeCategoryId: selectedCustomer.contractTypeCategoryId,
+            contractTypeCategoryName: selectedCustomer.contractTypeCategoryName,
+            expenseCategoryId: selectedExpenseCategory.id,
+            expenseCategoryName: selectedExpenseCategory.name,
+            status: "recorded",
+            expectedFromContractType: false,
+            totalSpentAmount: amount,
+            lastExpenseDate: form.date,
+            createdByUid: auth.currentUser?.uid ?? "",
+            createdByEmail: auth.currentUser?.email ?? "",
+            updatedByUid: auth.currentUser?.uid ?? "",
+            updatedByEmail: auth.currentUser?.email ?? "",
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
 
       setForm((prev) => ({
         ...initialExpenseForm,
@@ -323,13 +467,21 @@ export default function ExpensesPage() {
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400"
               >
                 <option value="">اختر تصنيف المصروف</option>
-                {expenseCategories.map((category) => (
+                {customerScopeExpenseCategories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
                   </option>
                 ))}
               </select>
             </label>
+          ) : null}
+
+          {form.scope === "customer" &&
+          hasTemplateForSelectedCustomerContractType &&
+          !customerScopeExpenseCategories.length ? (
+            <p className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              نوع عقد هذا العميل لا يحتوي على بنود مصروفات متوقعة بعد. أضفها من صفحة التصنيفات.
+            </p>
           ) : null}
 
           {form.scope === "company" ? (

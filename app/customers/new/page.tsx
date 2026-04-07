@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  addDoc,
   collection,
+  doc,
   getDocs,
   limit,
   onSnapshot,
   query,
   serverTimestamp,
+  writeBatch,
   where,
 } from "firebase/firestore";
 import { auth, db } from "@/app/lib/firebase";
@@ -23,6 +24,11 @@ type CategoryOption = {
   id: string;
   name: string;
   groupId: string;
+};
+
+type ContractTypeExpenseTemplate = {
+  expenseCategoryId: string;
+  expenseCategoryName: string;
 };
 
 type CustomerFormState = {
@@ -137,7 +143,32 @@ export default function NewCustomerPage() {
         return;
       }
 
-      const customerRef = await addDoc(collection(db, "customers"), {
+      const templatesQuery = query(
+        collection(db, "contractTypeExpenseTemplates"),
+        where("contractTypeCategoryId", "==", selectedContractType.id),
+      );
+      const templatesSnapshot = await getDocs(templatesQuery);
+      const templates = templatesSnapshot.docs
+        .map((docItem) => {
+          const data = docItem.data() as {
+            expenseCategoryId?: string;
+            expenseCategoryName?: string;
+          };
+          if (!data.expenseCategoryId) {
+            return null;
+          }
+
+          return {
+            expenseCategoryId: data.expenseCategoryId,
+            expenseCategoryName: data.expenseCategoryName ?? "",
+          } satisfies ContractTypeExpenseTemplate;
+        })
+        .filter((item): item is ContractTypeExpenseTemplate => item !== null);
+
+      const customerRef = doc(collection(db, "customers"));
+      const batch = writeBatch(db);
+
+      batch.set(customerRef, {
         contractNumber,
         name: customerName,
         phone,
@@ -152,6 +183,36 @@ export default function NewCustomerPage() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      templates.forEach((template) => {
+        const expectedExpenseRef = doc(
+          db,
+          "customerExpectedExpenses",
+          `${customerRef.id}_${template.expenseCategoryId}`,
+        );
+
+        batch.set(expectedExpenseRef, {
+          customerId: customerRef.id,
+          customerName,
+          customerContractNumber: contractNumber,
+          contractTypeCategoryId: selectedContractType.id,
+          contractTypeCategoryName: selectedContractType.name,
+          expenseCategoryId: template.expenseCategoryId,
+          expenseCategoryName: template.expenseCategoryName,
+          status: "pending",
+          expectedFromContractType: true,
+          totalSpentAmount: 0,
+          createdByUid: auth.currentUser?.uid ?? "",
+          createdByEmail: auth.currentUser?.email ?? "",
+          updatedByUid: auth.currentUser?.uid ?? "",
+          updatedByEmail: auth.currentUser?.email ?? "",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+
+      await batch.commit();
+
       void writeAuditLog({
         action: "create",
         entity: "customer",
@@ -159,6 +220,8 @@ export default function NewCustomerPage() {
         details: {
           contractNumber,
           name: customerName,
+          contractTypeCategoryId: selectedContractType.id,
+          expectedExpenseCount: templates.length,
         },
       });
 
