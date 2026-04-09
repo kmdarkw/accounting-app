@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
+import { useSearchParams } from "next/navigation";
 import {
   addDoc,
   collection,
@@ -72,8 +73,11 @@ const initialExpenseForm: ExpenseFormState = {
 };
 
 export default function ExpensesPage() {
+  const searchParams = useSearchParams();
   const [form, setForm] = useState(initialExpenseForm);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [hasLoadedCustomers, setHasLoadedCustomers] = useState(false);
+  const [hasAppliedInitialQuery, setHasAppliedInitialQuery] = useState(false);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [templates, setTemplates] = useState<ContractTypeExpenseTemplate[]>([]);
   const [currentUserRole, setCurrentUserRole] = useState<AppUserRole | null>(null);
@@ -120,6 +124,7 @@ export default function ExpensesPage() {
         .filter((item): item is CustomerOption => item !== null);
 
       setCustomers(nextCustomers);
+      setHasLoadedCustomers(true);
     });
 
     return () => unsubscribe();
@@ -244,6 +249,40 @@ export default function ExpensesPage() {
     hasTemplateForSelectedCustomerContractType,
     selectedCustomer?.contractTypeCategoryId,
   ]);
+
+  useEffect(() => {
+    if (hasAppliedInitialQuery || !hasLoadedCustomers) {
+      return;
+    }
+
+    const requestedScope = searchParams.get("scope");
+    const requestedCustomerId = searchParams.get("customerId");
+    const shouldPrefillCustomer = requestedScope === "customer" || Boolean(requestedCustomerId);
+
+    if (!shouldPrefillCustomer) {
+      setHasAppliedInitialQuery(true);
+      return;
+    }
+
+    const matchedCustomer = requestedCustomerId
+      ? customers.find((item) => item.id === requestedCustomerId)
+      : undefined;
+
+    setForm((prev) => ({
+      ...prev,
+      scope: "customer",
+      customerId: matchedCustomer?.id ?? "",
+      expenseCategoryId: "",
+      overrideOutsideTemplate: false,
+      outsideTemplateReason: "",
+    }));
+
+    if (requestedCustomerId && !matchedCustomer) {
+      setError("تعذر تحديد العميل من الرابط. يرجى اختياره يدويًا.");
+    }
+
+    setHasAppliedInitialQuery(true);
+  }, [customers, hasAppliedInitialQuery, hasLoadedCustomers, searchParams]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -431,6 +470,9 @@ export default function ExpensesPage() {
 
       setForm((prev) => ({
         ...initialExpenseForm,
+        scope: prev.scope,
+        customerId: prev.scope === "customer" ? prev.customerId : "",
+        accountCategoryId: prev.accountCategoryId,
         date: prev.date,
       }));
       const flags = [
