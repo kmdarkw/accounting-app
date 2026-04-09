@@ -14,6 +14,7 @@ const pageTitles: Record<string, string> = {
   "/customers": "العملاء",
   "/customers/new": "إضافة عميل جديد",
   "/users": "إدارة المستخدمين",
+  "/settings/users": "إدارة المستخدمين",
   "/categories": "التصنيفات",
   "/reports": "التقارير",
   "/settings": "الإعدادات",
@@ -25,7 +26,11 @@ export default function Header() {
   const router = useRouter();
   const pageTitle =
     pageTitles[pathname] ??
-    (pathname.startsWith("/customers") ? "العملاء" : "لوحة التحكم");
+    (pathname.startsWith("/customers")
+      ? "العملاء"
+      : pathname.startsWith("/settings")
+        ? "الإعدادات"
+        : "لوحة التحكم");
 
   async function handleLogout() {
     await signOut(auth);

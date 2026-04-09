@@ -74,7 +74,10 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
           return;
         }
 
-        if (pathname === "/users" && profile.role !== "super_admin") {
+        if (
+          (pathname === "/users" || pathname === "/settings/users") &&
+          profile.role !== "super_admin"
+        ) {
           setIsAllowed(false);
           setIsCheckingAuth(false);
           router.replace("/");
