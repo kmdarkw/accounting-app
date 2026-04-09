@@ -7,6 +7,7 @@ import Header from "@/app/components/Header";
 import Sidebar from "@/app/components/Sidebar";
 import { auth } from "@/app/lib/firebase";
 import { ensureUserProfile } from "@/app/lib/users";
+import type { AppUserRole } from "@/app/lib/users";
 
 type ProtectedLayoutProps = {
   children: ReactNode;
@@ -17,8 +18,10 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
   const router = useRouter();
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [isAllowed, setIsAllowed] = useState(false);
+  const [userRole, setUserRole] = useState<AppUserRole | null>(null);
   const isPublicRoute = pathname === "/login";
   const isPasswordChangeRoute = pathname === "/change-password";
+  const isExpensesRoute = pathname === "/expenses" || pathname.startsWith("/expenses/");
 
   useEffect(() => {
     if (isPublicRoute) {
@@ -48,6 +51,8 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
           return;
         }
 
+        setUserRole(profile.role);
+
         if (profile.mustChangePassword && !isPasswordChangeRoute) {
           setIsAllowed(false);
           setIsCheckingAuth(false);
@@ -58,7 +63,14 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
         if (!profile.mustChangePassword && isPasswordChangeRoute) {
           setIsAllowed(false);
           setIsCheckingAuth(false);
-          router.replace("/");
+          router.replace(profile.role === "super_admin" ? "/" : "/expenses");
+          return;
+        }
+
+        if (profile.role !== "super_admin" && !isExpensesRoute) {
+          setIsAllowed(false);
+          setIsCheckingAuth(false);
+          router.replace("/expenses");
           return;
         }
 
@@ -78,7 +90,7 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
     });
 
     return () => unsubscribe();
-  }, [isPasswordChangeRoute, isPublicRoute, pathname, router]);
+  }, [isExpensesRoute, isPasswordChangeRoute, isPublicRoute, pathname, router]);
 
   if (isPublicRoute) {
     return <>{children}</>;
@@ -104,7 +116,7 @@ export default function ProtectedLayout({ children }: ProtectedLayoutProps) {
 
   return (
     <div className="min-h-screen">
-      <Sidebar />
+      <Sidebar role={userRole} />
       <div className="lg:mr-72">
         <Header />
         <main className="px-4 py-6 lg:px-6">{children}</main>

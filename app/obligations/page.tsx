@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
   collection,
@@ -19,6 +20,7 @@ import {
 } from "@/app/lib/category-groups";
 import { formatCurrencyKwd, formatGregorianDate } from "@/app/lib/formatters";
 import { writeAuditLog } from "@/app/lib/audit";
+import { ensureUserProfile } from "@/app/lib/users";
 
 type Direction = "inflow" | "outflow";
 type RelatedTo = "customer" | "company" | "external";
@@ -98,10 +100,25 @@ export default function ObligationsPage() {
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [obligationItems, setObligationItems] = useState<ObligationItem[]>([]);
+  const [canSettleItems, setCanSettleItems] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [updatingItemId, setUpdatingItemId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setCanSettleItems(false);
+        return;
+      }
+
+      const profile = await ensureUserProfile(user);
+      setCanSettleItems(profile?.role === "super_admin");
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "customers"), (snapshot) => {
@@ -437,6 +454,11 @@ export default function ObligationsPage() {
   }
 
   async function handleSettleItem(item: ObligationItem) {
+    if (!canSettleItems) {
+      setError("تسوية البنود متاحة للسوبر أدمن فقط.");
+      return;
+    }
+
     try {
       setUpdatingItemId(item.id);
       await updateDoc(doc(db, "obligationItems", item.id), {
@@ -787,18 +809,22 @@ export default function ObligationsPage() {
                       </td>
                       <td className="px-5 py-3 font-semibold">{formatCurrencyKwd(item.amount)}</td>
                       <td className="px-5 py-3">
-                        <button
-                          type="button"
-                          onClick={() => handleSettleItem(item)}
-                          disabled={updatingItemId === item.id}
-                          className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 disabled:opacity-70"
-                        >
-                          {updatingItemId === item.id
-                            ? "جاري التحديث..."
-                            : item.direction === "inflow"
-                              ? "تم التحصيل"
-                              : "تم الصرف"}
-                        </button>
+                        {canSettleItems ? (
+                          <button
+                            type="button"
+                            onClick={() => handleSettleItem(item)}
+                            disabled={updatingItemId === item.id}
+                            className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-slate-800 disabled:opacity-70"
+                          >
+                            {updatingItemId === item.id
+                              ? "جاري التحديث..."
+                              : item.direction === "inflow"
+                                ? "تم التحصيل"
+                                : "تم الصرف"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-500">للسوبر أدمن فقط</span>
+                        )}
                       </td>
                     </tr>
                   );

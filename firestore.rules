@@ -28,7 +28,8 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isActiveUser() && currentUserProfile().role == "super_admin";
+      return isLegacyAdmin() ||
+        (isActiveUser() && currentUserProfile().role == "super_admin");
     }
 
     match /admins/{uid} {
@@ -37,10 +38,10 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if canUseApp();
+      allow read: if isSuperAdmin() ||
+        (isSignedIn() && request.auth.uid == uid);
 
-      allow create: if isSuperAdmin() ||
-        (isLegacyAdmin() && request.auth.uid == uid);
+      allow create: if isSuperAdmin();
 
       allow update: if isSuperAdmin() ||
         (
@@ -55,8 +56,27 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    match /expenses/{expenseId} {
+      allow read: if canUseApp();
+      allow create: if canUseApp();
+      allow update, delete: if isSuperAdmin();
+    }
+
+    match /customerExpectedExpenses/{expectedExpenseId} {
+      allow read: if canUseApp();
+      allow create, update: if canUseApp();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /auditLogs/{auditLogId} {
+      allow create: if canUseApp();
+      allow read: if isSuperAdmin();
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
-      allow read, write: if canUseApp();
+      allow read: if canUseApp();
+      allow write: if isSuperAdmin();
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
+import type { AppUserRole } from "@/app/lib/users";
 
 const navItems = [
   { label: "الرئيسية", href: "/", icon: LayoutDashboard },
@@ -26,8 +27,16 @@ const navItems = [
   { label: "الإعدادات", href: "/settings", icon: Settings },
 ];
 
-export default function Sidebar() {
+type SidebarProps = {
+  role: AppUserRole | null;
+};
+
+export default function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
+  const visibleNavItems =
+    role === "super_admin"
+      ? navItems
+      : navItems.filter((item) => item.href === "/expenses");
 
   return (
     <aside className="fixed inset-y-0 right-0 z-30 hidden w-72 border-l border-slate-200 bg-white lg:flex lg:flex-col">
@@ -37,7 +46,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-2 px-4 py-5">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive =
             pathname === item.href ||

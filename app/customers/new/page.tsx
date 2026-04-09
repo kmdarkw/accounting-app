@@ -165,6 +165,11 @@ export default function NewCustomerPage() {
         })
         .filter((item): item is ContractTypeExpenseTemplate => item !== null);
 
+      if (!templates.length) {
+        setError("لا يمكن حفظ العميل قبل إعداد قالب مصروفات لنوع العقد المختار.");
+        return;
+      }
+
       const customerRef = doc(collection(db, "customers"));
       const batch = writeBatch(db);
 

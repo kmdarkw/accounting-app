@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
   collection,
@@ -22,6 +23,8 @@ import {
 } from "@/app/lib/category-groups";
 import { writeAuditLog } from "@/app/lib/audit";
 import { formatCurrencyKwd, formatGregorianDate } from "@/app/lib/formatters";
+import { ensureUserProfile } from "@/app/lib/users";
+import type { AppUserRole } from "@/app/lib/users";
 
 type ExpenseScope = "company" | "customer";
 
@@ -52,6 +55,8 @@ type ExpenseFormState = {
   accountCategoryId: string;
   date: string;
   notes: string;
+  overrideOutsideTemplate: boolean;
+  outsideTemplateReason: string;
 };
 
 const initialExpenseForm: ExpenseFormState = {
@@ -62,6 +67,8 @@ const initialExpenseForm: ExpenseFormState = {
   accountCategoryId: "",
   date: new Date().toISOString().slice(0, 10),
   notes: "",
+  overrideOutsideTemplate: false,
+  outsideTemplateReason: "",
 };
 
 export default function ExpensesPage() {
@@ -69,9 +76,24 @@ export default function ExpensesPage() {
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [templates, setTemplates] = useState<ContractTypeExpenseTemplate[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<AppUserRole | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setCurrentUserRole(null);
+        return;
+      }
+
+      const profile = await ensureUserProfile(user);
+      setCurrentUserRole(profile?.role ?? null);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "customers"), (snapshot) => {
@@ -165,6 +187,7 @@ export default function ExpensesPage() {
     () => categories.filter((category) => category.groupId === ACCOUNT_GROUP_ID),
     [categories],
   );
+  const isSuperAdmin = currentUserRole === "super_admin";
 
   const selectedCustomer = useMemo(
     () => customers.find((customer) => customer.id === form.customerId),
@@ -196,6 +219,18 @@ export default function ExpensesPage() {
   }, [selectedCustomer, templates]);
 
   const customerScopeExpenseCategories = useMemo(() => {
+    if (!selectedCustomer?.contractTypeCategoryId) {
+      return isSuperAdmin ? expenseCategories : [];
+    }
+
+    if (!hasTemplateForSelectedCustomerContractType) {
+      return isSuperAdmin ? expenseCategories : [];
+    }
+
+    if (!allowedExpenseCategoryIdsForSelectedCustomer.length) {
+      return isSuperAdmin ? expenseCategories : [];
+    }
+
     if (!hasTemplateForSelectedCustomerContractType) {
       return expenseCategories;
     }
@@ -203,9 +238,11 @@ export default function ExpensesPage() {
     const allowedIds = new Set(allowedExpenseCategoryIdsForSelectedCustomer);
     return expenseCategories.filter((category) => allowedIds.has(category.id));
   }, [
+    isSuperAdmin,
     allowedExpenseCategoryIdsForSelectedCustomer,
     expenseCategories,
     hasTemplateForSelectedCustomerContractType,
+    selectedCustomer?.contractTypeCategoryId,
   ]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -235,6 +272,10 @@ export default function ExpensesPage() {
     let selectedCustomer: CustomerOption | undefined;
     let selectedExpenseCategory: CategoryOption | undefined;
     let selectedCompanyExpenseCategory: CategoryOption | undefined;
+    let isOutsideTemplate = false;
+    let outsideTemplateReason = "";
+    let isRepeatedExpense = false;
+    let repeatIndex = 1;
 
     if (form.scope === "customer") {
       if (!form.customerId.trim() || !form.expenseCategoryId.trim()) {
@@ -252,13 +293,42 @@ export default function ExpensesPage() {
         return;
       }
 
-      if (
-        hasTemplateForSelectedCustomerContractType &&
-        !allowedExpenseCategoryIdsForSelectedCustomer.includes(selectedExpenseCategory.id)
-      ) {
-        setError("هذا البند غير متوقع لنوع عقد العميل المحدد.");
-        return;
+      const categoryInTemplate = allowedExpenseCategoryIdsForSelectedCustomer.includes(
+        selectedExpenseCategory.id,
+      );
+
+      isOutsideTemplate =
+        !selectedCustomer.contractTypeCategoryId ||
+        !hasTemplateForSelectedCustomerContractType ||
+        !categoryInTemplate;
+
+      if (isOutsideTemplate) {
+        if (!isSuperAdmin) {
+          setError("غير مسموح تسجيل مصروف خارج القالب إلا للسوبر أدمن.");
+          return;
+        }
+
+        if (!form.overrideOutsideTemplate) {
+          setError("يرجى تفعيل خيار الاستثناء لتسجيل بند خارج القالب.");
+          return;
+        }
+
+        outsideTemplateReason = form.outsideTemplateReason.trim();
+        if (!outsideTemplateReason) {
+          setError("يرجى كتابة سبب تسجيل المصروف خارج القالب.");
+          return;
+        }
       }
+
+      const repeatedExpenseQuery = query(
+        collection(db, "expenses"),
+        where("scope", "==", "customer"),
+        where("customerId", "==", selectedCustomer.id),
+        where("expenseCategoryId", "==", selectedExpenseCategory.id),
+      );
+      const repeatedExpenseSnapshot = await getDocs(repeatedExpenseQuery);
+      isRepeatedExpense = !repeatedExpenseSnapshot.empty;
+      repeatIndex = repeatedExpenseSnapshot.size + 1;
     } else {
       if (!form.expenseCategoryId.trim()) {
         setError("عند الصرف العام يجب اختيار تصنيف مصروفات الشركة.");
@@ -290,6 +360,10 @@ export default function ExpensesPage() {
           selectedExpenseCategory?.id ?? selectedCompanyExpenseCategory?.id ?? "",
         expenseCategoryName:
           selectedExpenseCategory?.name ?? selectedCompanyExpenseCategory?.name ?? "",
+        isOutsideTemplate,
+        outsideTemplateReason: isOutsideTemplate ? outsideTemplateReason : "",
+        isRepeatedExpense: form.scope === "customer" ? isRepeatedExpense : false,
+        repeatIndex: form.scope === "customer" ? repeatIndex : 1,
         createdByUid: auth.currentUser?.uid ?? "",
         createdByEmail: auth.currentUser?.email ?? "",
         updatedByUid: auth.currentUser?.uid ?? "",
@@ -307,6 +381,9 @@ export default function ExpensesPage() {
           customerId: selectedCustomer?.id ?? "",
           expenseCategoryId:
             selectedExpenseCategory?.id ?? selectedCompanyExpenseCategory?.id ?? "",
+          isOutsideTemplate,
+          isRepeatedExpense,
+          repeatIndex,
         },
       });
 
@@ -356,7 +433,15 @@ export default function ExpensesPage() {
         ...initialExpenseForm,
         date: prev.date,
       }));
-      setSuccess("تم تسجيل المصروف بنجاح.");
+      const flags = [
+        isOutsideTemplate ? "خارج القالب" : "",
+        isRepeatedExpense ? "مكرر" : "",
+      ].filter(Boolean);
+      setSuccess(
+        flags.length
+          ? `تم تسجيل المصروف بنجاح (${flags.join(" - ")}).`
+          : "تم تسجيل المصروف بنجاح.",
+      );
     } catch {
       setError("تعذر حفظ المصروف حالياً. حاول مرة أخرى.");
     } finally {
@@ -386,6 +471,8 @@ export default function ExpensesPage() {
                     scope: "company",
                     customerId: "",
                     expenseCategoryId: "",
+                    overrideOutsideTemplate: false,
+                    outsideTemplateReason: "",
                   }))
                 }
                 className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
@@ -403,6 +490,8 @@ export default function ExpensesPage() {
                     ...prev,
                     scope: "customer",
                     expenseCategoryId: "",
+                    overrideOutsideTemplate: false,
+                    outsideTemplateReason: "",
                   }))
                 }
                 className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
@@ -477,11 +566,49 @@ export default function ExpensesPage() {
           ) : null}
 
           {form.scope === "customer" &&
-          hasTemplateForSelectedCustomerContractType &&
+          !isSuperAdmin &&
+          !hasTemplateForSelectedCustomerContractType &&
           !customerScopeExpenseCategories.length ? (
             <p className="md:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              نوع عقد هذا العميل لا يحتوي على بنود مصروفات متوقعة بعد. أضفها من صفحة التصنيفات.
+              نوع عقد هذا العميل لا يحتوي على قالب مصروفات. لا يمكن التسجيل إلا بعد إعداد القالب.
             </p>
+          ) : null}
+
+          {form.scope === "customer" && isSuperAdmin ? (
+            <div className="md:col-span-2 space-y-2 rounded-xl border border-slate-200 p-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.overrideOutsideTemplate}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      overrideOutsideTemplate: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <span>استثناء مدير النظام: السماح بالتسجيل خارج القالب</span>
+              </label>
+
+              {form.overrideOutsideTemplate ? (
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-slate-700">سبب الاستثناء</span>
+                  <textarea
+                    value={form.outsideTemplateReason}
+                    onChange={(event) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        outsideTemplateReason: event.target.value,
+                      }))
+                    }
+                    rows={2}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-slate-400"
+                    placeholder="اذكر سبب تسجيل البند خارج القالب"
+                  />
+                </label>
+              ) : null}
+            </div>
           ) : null}
 
           {form.scope === "company" ? (

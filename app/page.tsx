@@ -20,6 +20,9 @@ type ExpenseItem = {
   scope: "company" | "customer";
   customerName: string;
   expenseCategoryName: string;
+  isRepeatedExpense: boolean;
+  repeatIndex: number;
+  isOutsideTemplate: boolean;
 };
 
 type ObligationItem = {
@@ -78,6 +81,9 @@ export default function HomePage() {
             scope?: "company" | "customer";
             customerName?: string;
             expenseCategoryName?: string;
+            isRepeatedExpense?: boolean;
+            repeatIndex?: number;
+            isOutsideTemplate?: boolean;
           };
           if (!data.date || typeof data.amount !== "number") {
             return null;
@@ -90,6 +96,9 @@ export default function HomePage() {
             scope: data.scope === "customer" ? "customer" : "company",
             customerName: data.customerName ?? "",
             expenseCategoryName: data.expenseCategoryName ?? "",
+            isRepeatedExpense: data.isRepeatedExpense ?? false,
+            repeatIndex: data.repeatIndex ?? 1,
+            isOutsideTemplate: data.isOutsideTemplate ?? false,
           } satisfies ExpenseItem;
         })
         .filter((item): item is ExpenseItem => item !== null);
@@ -199,7 +208,9 @@ export default function HomePage() {
       date: item.date,
       description:
         item.scope === "customer"
-          ? `${item.customerName || "عميل"} - ${item.expenseCategoryName || "مصروف عميل"}`
+          ? `${item.customerName || "عميل"} - ${item.expenseCategoryName || "مصروف عميل"}${
+              item.isRepeatedExpense ? ` (مكرر #${item.repeatIndex})` : ""
+            }${item.isOutsideTemplate ? " (خارج القالب)" : ""}`
           : "مصروف عام للشركة",
       type: "مصروف" as const,
       amount: item.amount,
